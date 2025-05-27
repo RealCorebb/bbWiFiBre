@@ -125,7 +125,7 @@ void LEDUpdateTask(void *pvParameters) {
 
     // Section 2: Calculate ideal colors and set targets for LEDs
     for (int i = 0; i < CHANNELS; i++) {
-      float intensity = fmin(localChannelActivity[i] / 70.0f, 1.0f); // Adjusted divisor for sensitivity
+      float intensity = fmin(localChannelActivity[i] / 70.0f, 1.0f); 
       uint32_t calculatedChannelColor;
 
       if (localChannelActivity[i] == 0) {
@@ -136,30 +136,39 @@ void LEDUpdateTask(void *pvParameters) {
         calculatedChannelColor = interpolateColor(MID_COLOR, HIGH_COLOR, (intensity - 0.5f) * 2.0f);
       }
 
-      // Apply brightness
-      uint8_t r = (calculatedChannelColor >> 16) & 0xFF;
-      uint8_t g = (calculatedChannelColor >> 8) & 0xFF;
-      uint8_t b = calculatedChannelColor & 0xFF;
+      uint8_t r_ideal = (calculatedChannelColor >> 16) & 0xFF;
+      uint8_t g_ideal = (calculatedChannelColor >> 8) & 0xFF;
+      uint8_t b_ideal = calculatedChannelColor & 0xFF;
 
-      r *= localChannelBrightness[i];
-      g *= localChannelBrightness[i];
-      b *= localChannelBrightness[i];
-      uint32_t idealColorForChannel = strip.Color(r, g, b);
+      r_ideal *= localChannelBrightness[i];
+      g_ideal *= localChannelBrightness[i];
+      b_ideal *= localChannelBrightness[i];
+      uint32_t idealColorForChannel = strip.Color(r_ideal, g_ideal, b_ideal);
+      // --- End of idealColorForChannel calculation ---
 
       // --- Set targets based on your row logic ---
       // Primary LED (e.g., LED 13 for channel 0) targets new color immediately
       int primaryLedIndex = i + CHANNELS;
       targetLedStripColors[primaryLedIndex] = idealColorForChannel;
 
-      // Delayed LED (e.g., LED 0 for channel 0)
-      // If the ideal color changes, reset the delay mechanism for this channel's delayed LED
-      // Also check if there's already a different pending color or if the delay finished.
-      if (idealColorForChannel != pendingColorForDelayedLed[i] || framesToDelayForLed[i] == 0) {
-          pendingColorForDelayedLed[i] = idealColorForChannel;
+      // Delayed LED (e.g., LED 0 for channel i) - REVISED LOGIC HERE
+      int delayedLedIndex = i;
+
+      // If the current delay cycle for this delayed LED has finished (counter is 0)
+      if (framesToDelayForLed[i] == 0) {
+        // We are ready to capture the current idealColorForChannel for the *next* delay sequence.
+        // This captured color will be applied once the new delay countdown finishes.
+        
+        pendingColorForDelayedLed[i] = idealColorForChannel; // Latch the current ideal color
+
+        if (ROW_DELAY_FRAMES > 0) {
+          // If there's an actual delay configured, start a new countdown.
           framesToDelayForLed[i] = ROW_DELAY_FRAMES;
-          if (ROW_DELAY_FRAMES == 0) { // If no delay, target immediately
-             targetLedStripColors[i] = idealColorForChannel;
-          }
+        } else { // ROW_DELAY_FRAMES == 0
+          // If no delay, apply the color to the target immediately.
+          // framesToDelayForLed[i] will remain 0.
+          targetLedStripColors[delayedLedIndex] = idealColorForChannel;
+        }
       }
     }
 
