@@ -11,7 +11,7 @@
 
 // --- Configuration ---
 const float SMOOTHING_FACTOR = 0.35f;      // How quickly colors change (0.0 to 1.0). Higher is faster.
-const uint8_t ROW_DELAY_FRAMES = 2;        // Delay for the second row in update frames (5 frames * 20ms/frame = 100ms delay)
+const uint8_t ROW_DELAY_FRAMES = 6;        // Delay for the second row in update frames (5 frames * 20ms/frame = 100ms delay)
 const TickType_t LED_UPDATE_INTERVAL_MS = 20; // Update LEDs at 50Hz
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
