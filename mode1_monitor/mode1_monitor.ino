@@ -2,70 +2,68 @@
 #include <esp_wifi.h>
 #include <Adafruit_NeoPixel.h>
 #include <string.h> // For memcpy and memcmp
-#include <math.h>   // For fmin, fmax
+#include <math.h>   // For fmin, fmax, sinf
 
 // --- Network Configuration ---
-#define LED_PIN 10             // GPIO pin connected to the NeoPixel data input
-#define MAX_CLIENT_DEVICES 13  // Maximum number of unique client devices to track
-#define NUM_LEDS (MAX_CLIENT_DEVICES * 2) // Total LEDs: 13 for clients (ToAP), 13 for AP (FromAP)
+#define LED_PIN 10
+#define MAX_CLIENT_DEVICES 13
+#define NUM_LEDS (MAX_CLIENT_DEVICES * 2)
 
 const uint8_t WIFI_CHANNEL = 13; // << SET YOUR ROUTER'S 2.4GHz WIFI CHANNEL HERE >>
-
 // << REPLACE WITH YOUR ROUTER'S ACTUAL MAC ADDRESS >>
 const uint8_t ROUTER_MAC[6] = {0xDC, 0xD8, 0x7C, 0x5C, 0x32, 0x7D};
 
 // --- General LED & Task Config ---
-const int LED_BRIGHTNESS = 200;                // Global brightness for the NeoPixel strip (0-255)
-const TickType_t LED_UPDATE_INTERVAL_MS = 20; // Update LEDs at 20Hz (50ms interval)
-const unsigned long DEVICE_TIMEOUT_MS = 90000;// Forget device after 1.5 minutes of inactivity
+const int LED_BRIGHTNESS = 200;
+const TickType_t LED_UPDATE_INTERVAL_MS = 20;
+const unsigned long DEVICE_TIMEOUT_MS = 90000;
 
 //==================================================================================
 // >>> TUNING PARAMETERS for Activity Sensitivity & Visualization <<<
 //==================================================================================
-
-// -- Activity Score Calculation --
-// Max score an activity can reach. Lowering this makes visualization more sensitive.
-const float MAX_ACTIVITY_SCORE = 200.0f;
-// How quickly activity fades. Closer to 1.0 = slower decay (e.g., 0.95). Closer to 0.0 = faster decay (e.g., 0.85).
+const float MAX_ACTIVITY_SCORE = 150.0f;
 const float ACTIVITY_DECAY_FACTOR = 0.92f;
-// Divisor for packet_length contribution to activity boost. Smaller = more sensitive to packet size.
 const float PACKET_SIZE_DIVISOR_FOR_BOOST = 2.0f;
-// Base activity points added for a packet from/to an already tracked device.
 const float BASE_BOOST_EXISTING_DEVICE = 15.0f;
-// Base activity points added for a packet from/to a newly discovered/assigned device.
 const float BASE_BOOST_NEW_DEVICE = 30.0f;
 
-// -- Color & Brightness Calculation (Normalized Intensity is 0.0 to 1.0) --
-// Base brightness for any active LED (0-255). Activity adds to this.
 const uint8_t BRIGHTNESS_BASE_ACTIVE = 40;
-// How much normalized_intensity scales brightness on top of the base (0-255 limit still applies).
 const uint8_t BRIGHTNESS_SCALING_FACTOR = 215;
 
-// Thresholds for normalized_intensity to change color ranges:
-const float THRESHOLD_INTENSITY_VERY_LOW = 0.05f; // Below this is considered "very low"
-const float THRESHOLD_INTENSITY_LOW_TO_MID = 0.15f; // Below this is "low", above is "medium"
-const float THRESHOLD_INTENSITY_MID_TO_HIGH = 0.50f; // Below this is "medium", above is "high"
-const float THRESHOLD_INTENSITY_FORCE_RED = 0.85f; // Above this, color is forced to Red
+const float THRESHOLD_INTENSITY_VERY_LOW = 0.05f;
+const float THRESHOLD_INTENSITY_LOW_TO_MID = 0.15f;
+const float THRESHOLD_INTENSITY_MID_TO_HIGH = 0.50f;
+const float THRESHOLD_INTENSITY_FORCE_RED = 0.85f;
 
-// Specific brightness override for "VERY_LOW" activity band (if needed for visibility)
 const bool  ENABLE_VERY_LOW_BRIGHTNESS_OVERRIDE = true;
 const uint8_t BRIGHTNESS_VERY_LOW_BASE_OVERRIDE = 50;
-const float BRIGHTNESS_VERY_LOW_SCALE_OVERRIDE = 50.0f; // Multiplied by (normalized_intensity / THRESHOLD_INTENSITY_VERY_LOW)
+const float BRIGHTNESS_VERY_LOW_SCALE_OVERRIDE = 50.0f;
 
-// Hue values (0-65535) for HSV color model, defining the color spectrum:
 const uint16_t HUE_VERY_LOW      = 43690; // Dim Blue/Purple
 const uint16_t HUE_LOW_START     = 43690; // Blue
 const uint16_t HUE_LOW_END       = 32768; // Cyan
 const uint16_t HUE_MID_START     = 32768; // Cyan
 const uint16_t HUE_MID_END       = 21845; // Green
 const uint16_t HUE_HIGH_START    = 21845; // Green
-const uint16_t HUE_HIGH_END      = 0;     // Red (full spectrum sweep)
-const uint16_t HUE_FORCE_RED     = 0;     // Red
+const uint16_t HUE_HIGH_END      = 0;     // Red
+const uint16_t HUE_FORCE_RED     = 0;
+
+// --- Idle LED Effect Tuning (for unused device slots) ---
+const bool ENABLE_IDLE_EFFECT = true;
+// Speed of the breathing effect (e.g., 0.5f for slow, 2.0f for faster)
+const float IDLE_BREATH_SPEED = 1.0f;
+// Phase offset per LED column for the breathing effect, creates a gentle wave. Radians.
+const float IDLE_COLUMN_PHASE_OFFSET = 0.5f;
+// Min and Max brightness for the idle breathing effect (0-255)
+const uint8_t IDLE_MIN_BRIGHTNESS = 10;
+const uint8_t IDLE_MAX_BRIGHTNESS = 35; // Keep it dim to not overpower active LEDs
+// Base colors for idle LEDs (RGB). These will be brightness modulated.
+const uint8_t IDLE_R1 = 5, IDLE_G1 = 0, IDLE_B1 = 20;   // For first row of idle slot (e.g., dim purple)
+const uint8_t IDLE_R2 = 0, IDLE_G2 = 5, IDLE_B2 = 20;   // For second row of idle slot (e.g., dim blue/teal)
 //==================================================================================
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-// --- Structures ---
 struct ieee80211_hdr_minimal_t {
     uint16_t frame_control;
     uint16_t duration_id;
@@ -85,7 +83,16 @@ struct DeviceInfo {
 DeviceInfo trackedClientDevices[MAX_CLIENT_DEVICES];
 SemaphoreHandle_t deviceDataMutex;
 
-// --- WiFi Packet Handler ---
+// --- Helper function to scale a base RGB color by a brightness value (0-255) ---
+uint32_t scaleColorBrightness(uint8_t r_base, uint8_t g_base, uint8_t b_base, uint8_t brightness_scaler) {
+    float factor = (float)brightness_scaler / 255.0f;
+    uint8_t r = (uint8_t)(r_base * factor);
+    uint8_t g = (uint8_t)(g_base * factor);
+    uint8_t b = (uint8_t)(b_base * factor);
+    return strip.Color(r, g, b);
+}
+
+// --- WiFi Packet Handler (Mostly Unchanged) ---
 void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_DATA) {
         return; 
@@ -112,16 +119,10 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
             client_mac_ptr = header->addr1;
             isFromAPTraffic = true;
         }
-    } else {
-        return;
-    }
+    } else { return; }
 
-    if (client_mac_ptr == nullptr || memcmp(client_mac_ptr, ROUTER_MAC, 6) == 0) {
-        return;
-    }
-    if (client_mac_ptr[0] == 0xFF || client_mac_ptr[0] == 0x01 || client_mac_ptr[0] == 0x33) {
-        return;
-    }
+    if (client_mac_ptr == nullptr || memcmp(client_mac_ptr, ROUTER_MAC, 6) == 0) { return; }
+    if (client_mac_ptr[0] == 0xFF || client_mac_ptr[0] == 0x01 || client_mac_ptr[0] == 0x33) { return; }
 
     if (xSemaphoreTake(deviceDataMutex, (TickType_t)0) == pdTRUE) {
         int found_device_index = -1;
@@ -154,7 +155,7 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
                 memcpy(trackedClientDevices[target_idx].mac, client_mac_ptr, 6);
                 trackedClientDevices[target_idx].activityScoreToAP = 0;
                 trackedClientDevices[target_idx].activityScoreFromAP = 0;
-                is_newly_assigned_device_in_slot = true; // Flag that this slot just got a new device
+                is_newly_assigned_device_in_slot = true;
             }
         }
         
@@ -180,7 +181,7 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     }
 }
 
-// --- Helper function to get LED color based on activity ---
+// --- Helper function to get LED color based on activity (Unchanged) ---
 uint32_t getActivityColor(float activityScore, float maxScoreToNormalizeAgainst) {
     if (activityScore < 1.0f) return strip.Color(0,0,0); 
 
@@ -206,7 +207,6 @@ uint32_t getActivityColor(float activityScore, float maxScoreToNormalizeAgainst)
         hue = HUE_MID_START - (uint16_t)(factor * (HUE_MID_START - HUE_MID_END));
     } else { 
         float factor = (normalized_intensity - THRESHOLD_INTENSITY_MID_TO_HIGH) / (1.0f - THRESHOLD_INTENSITY_MID_TO_HIGH);
-        // Ensure factor does not go above 1.0 if normalized_intensity slightly exceeds 1.0 before fmin
         factor = fmin(1.0f, factor); 
         hue = HUE_HIGH_START - (uint16_t)(factor * (HUE_HIGH_START - HUE_HIGH_END));
         if (normalized_intensity > THRESHOLD_INTENSITY_FORCE_RED) {
@@ -229,6 +229,7 @@ void led_update_task(void *pvParameters) {
             unsigned long currentTime = millis();
             for (int i = 0; i < MAX_CLIENT_DEVICES; i++) {
                 if (trackedClientDevices[i].isActive) {
+                    // Decay and timeout logic (mostly unchanged)
                     trackedClientDevices[i].activityScoreToAP *= ACTIVITY_DECAY_FACTOR;
                     if (trackedClientDevices[i].activityScoreToAP < 0.5f) {
                         trackedClientDevices[i].activityScoreToAP = 0;
@@ -242,16 +243,16 @@ void led_update_task(void *pvParameters) {
                         if (trackedClientDevices[i].activityScoreToAP == 0 && trackedClientDevices[i].activityScoreFromAP == 0) {
                              trackedClientDevices[i].isActive = false;
                         } else if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS + 20000) { 
-                            // Extra grace period if scores were still high, then force inactive
                             trackedClientDevices[i].isActive = false;
                         }
                     }
                     
-                    if (!trackedClientDevices[i].isActive) { // Re-check after potential timeout logic
+                    if (!trackedClientDevices[i].isActive) { 
                         trackedClientDevices[i].activityScoreToAP = 0;
                         trackedClientDevices[i].activityScoreFromAP = 0;
                     }
 
+                    // Set colors for active device based on its scores
                     uint32_t colorToAP = getActivityColor(trackedClientDevices[i].activityScoreToAP, MAX_ACTIVITY_SCORE);
                     strip.setPixelColor(i, colorToAP);
 
@@ -259,8 +260,29 @@ void led_update_task(void *pvParameters) {
                     strip.setPixelColor(i + MAX_CLIENT_DEVICES, colorFromAP);
 
                 } else { 
-                    strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-                    strip.setPixelColor(i + MAX_CLIENT_DEVICES, strip.Color(0, 0, 0));
+                    // **** THIS IS THE NEW IDLE EFFECT LOGIC ****
+                    if (ENABLE_IDLE_EFFECT) {
+                        
+                        float time_val_rad = (float)millis() / 1000.0f * IDLE_BREATH_SPEED; // Time in radians for sine wave
+                        // Calculate a smoothly varying brightness (0.0 to 1.0) using sine
+                        float breath_normalized_brightness = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET) + 1.0f) / 2.0f;
+                        uint8_t current_breath_brightness = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
+                        
+                        // Apply to first row idle LED for this slot
+                        uint32_t idle_color_row1 = scaleColorBrightness(IDLE_R1, IDLE_G1, IDLE_B1, current_breath_brightness);
+                        strip.setPixelColor(i, idle_color_row1); 
+
+                        // Apply to second row idle LED for this slot (can use same brightness or a variation)
+                        // For a slightly different feel, let's make the second row's phase slightly offset from the column's main phase
+                        float breath_normalized_brightness_r2 = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET + 0.3f) + 1.0f) / 2.0f; // Small extra phase for row2
+                        uint8_t current_breath_brightness_r2 = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness_r2 * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
+                        uint32_t idle_color_row2 = scaleColorBrightness(IDLE_R2, IDLE_G2, IDLE_B2, current_breath_brightness_r2);
+                        strip.setPixelColor(i + MAX_CLIENT_DEVICES, idle_color_row2);
+                    } else {
+                        // If idle effect is disabled, turn them off
+                        strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+                        strip.setPixelColor(i + MAX_CLIENT_DEVICES, strip.Color(0, 0, 0));
+                    }
                 }
             }
             xSemaphoreGive(deviceDataMutex);
@@ -269,19 +291,15 @@ void led_update_task(void *pvParameters) {
     }
 }
 
-// --- Arduino Setup Function ---
+// --- Arduino Setup Function (Mostly Unchanged) ---
 void setup() {
     Serial.begin(115200);
     while (!Serial) { delay(10); } 
-    Serial.println("Starting Configurable WiFi Home Device Activity Monitor (Dual Row)...");
+    Serial.println("Starting Configurable WiFi Home Device Activity Monitor (Dual Row with Idle Effect)...");
     Serial.println("--- Current Tuning Parameters ---");
     Serial.printf("MAX_ACTIVITY_SCORE: %.2f\n", MAX_ACTIVITY_SCORE);
-    Serial.printf("ACTIVITY_DECAY_FACTOR: %.2f\n", ACTIVITY_DECAY_FACTOR);
-    Serial.printf("PACKET_SIZE_DIVISOR_FOR_BOOST: %.2f\n", PACKET_SIZE_DIVISOR_FOR_BOOST);
-    Serial.printf("BASE_BOOST_EXISTING_DEVICE: %.2f\n", BASE_BOOST_EXISTING_DEVICE);
-    Serial.printf("BASE_BOOST_NEW_DEVICE: %.2f\n", BASE_BOOST_NEW_DEVICE);
+    Serial.printf("IDLE_BREATH_SPEED: %.2f\n", IDLE_BREATH_SPEED);
     Serial.println("-------------------------------");
-
 
     strip.begin();
     strip.setBrightness(LED_BRIGHTNESS);
@@ -304,20 +322,11 @@ void setup() {
     WiFi.disconnect();   
 
     esp_err_t promiscuous_err = esp_wifi_set_promiscuous(true);
-    if (promiscuous_err != ESP_OK) {
-        Serial.printf("Error setting promiscuous mode: %s\n", esp_err_to_name(promiscuous_err));
-        return;
-    }
+    if (promiscuous_err != ESP_OK) { Serial.printf("Error promiscuous: %s\n", esp_err_to_name(promiscuous_err)); return; }
     esp_err_t channel_err = esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
-     if (channel_err != ESP_OK) {
-        Serial.printf("Error setting WiFi channel: %s\n", esp_err_to_name(channel_err));
-        return;
-    }
+    if (channel_err != ESP_OK) { Serial.printf("Error channel: %s\n", esp_err_to_name(channel_err)); return; }
     esp_err_t cb_err = esp_wifi_set_promiscuous_rx_cb(wifi_sniffer_packet_handler);
-    if (cb_err != ESP_OK) {
-        Serial.printf("Error setting promiscuous RX callback: %s\n", esp_err_to_name(cb_err));
-        return;
-    }
+    if (cb_err != ESP_OK) { Serial.printf("Error RX CB: %s\n", esp_err_to_name(cb_err)); return; }
     
     Serial.printf("Sniffing on WiFi Channel %d.\n", WIFI_CHANNEL);
     Serial.print("Monitoring traffic with Router MAC: ");
