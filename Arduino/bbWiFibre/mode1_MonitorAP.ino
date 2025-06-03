@@ -1,21 +1,5 @@
-#include <WiFi.h>
-#include <esp_wifi.h>
-#include <Adafruit_NeoPixel.h>
-#include <string.h> // For memcpy and memcmp
-#include <math.h>   // For fmin, fmax, sinf
-
-// --- Network Configuration ---
-#define LED_PIN 10
-#define MAX_CLIENT_DEVICES 13
-#define NUM_LEDS (MAX_CLIENT_DEVICES * 2)
-
-const uint8_t WIFI_CHANNEL = 13; // << SET YOUR ROUTER'S 2.4GHz WIFI CHANNEL HERE >>
-// << REPLACE WITH YOUR ROUTER'S ACTUAL MAC ADDRESS >>
-const uint8_t ROUTER_MAC[6] = {0xDC, 0xD8, 0x7C, 0x5C, 0x32, 0x7D};
-
 // --- General LED & Task Config ---
 const int LED_BRIGHTNESS = 200;
-const TickType_t LED_UPDATE_INTERVAL_MS = 20;
 const unsigned long DEVICE_TIMEOUT_MS = 90000;
 
 //==================================================================================
@@ -70,8 +54,6 @@ volatile unsigned long g_intruder_alert_start_time_ms = 0;
 unsigned long g_esp_boot_time_ms = 0;
 //==================================================================================
 
-Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
-
 struct ieee80211_hdr_minimal_t {
     uint16_t frame_control;
     uint16_t duration_id;
@@ -80,13 +62,6 @@ struct ieee80211_hdr_minimal_t {
     uint8_t addr3[6];
 } __attribute__((packed));
 
-struct DeviceInfo {
-    uint8_t mac[6];
-    volatile float activityScoreToAP;
-    volatile float activityScoreFromAP;
-    unsigned long lastSeenTime;
-    bool isActive;
-};
 
 DeviceInfo trackedClientDevices[MAX_CLIENT_DEVICES];
 SemaphoreHandle_t deviceDataMutex;
@@ -329,68 +304,4 @@ void led_update_task(void *pvParameters) {
         }
         strip.show();
     }
-}
-
-// --- Arduino Setup Function ---
-void setup() {
-    Serial.begin(115200);
-    g_esp_boot_time_ms = millis(); // Record boot time
-    while (!Serial) { delay(10); }
-    Serial.println("Starting Configurable WiFi Home Device Activity Monitor (Dual Row with Idle Effect)...");
-    Serial.println("--- Current Tuning Parameters ---");
-    Serial.printf("MAX_ACTIVITY_SCORE: %.2f\n", MAX_ACTIVITY_SCORE);
-    Serial.printf("IDLE_BREATH_SPEED: %.2f\n", IDLE_BREATH_SPEED);
-    // Serial.println("-------------------------------"); // Moved this down
-
-    // Initialize intruder mode state
-    g_intruder_detection_armed = false;
-    g_intruder_alert_active = false;
-
-    strip.begin();
-    strip.setBrightness(LED_BRIGHTNESS);
-    strip.show();
-
-    for (int i = 0; i < MAX_CLIENT_DEVICES; i++) {
-        trackedClientDevices[i].isActive = false;
-        trackedClientDevices[i].activityScoreToAP = 0;
-        trackedClientDevices[i].activityScoreFromAP = 0;
-        memset(trackedClientDevices[i].mac, 0, 6);
-    }
-
-    deviceDataMutex = xSemaphoreCreateMutex();
-    if (deviceDataMutex == NULL) {
-        Serial.println("Error: Mutex creation failed!");
-        while (1) { delay(1000); }
-    }
-
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-
-    esp_err_t promiscuous_err = esp_wifi_set_promiscuous(true);
-    if (promiscuous_err != ESP_OK) { Serial.printf("Error promiscuous: %s\n", esp_err_to_name(promiscuous_err)); return; }
-    esp_err_t channel_err = esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
-    if (channel_err != ESP_OK) { Serial.printf("Error channel: %s\n", esp_err_to_name(channel_err)); return; }
-    esp_err_t cb_err = esp_wifi_set_promiscuous_rx_cb(wifi_sniffer_packet_handler);
-    if (cb_err != ESP_OK) { Serial.printf("Error RX CB: %s\n", esp_err_to_name(cb_err)); return; }
-
-    Serial.printf("Sniffing on WiFi Channel %d.\n", WIFI_CHANNEL);
-    Serial.print("Monitoring traffic with Router MAC: ");
-    for(int i=0; i<6; ++i) { Serial.printf("%02X", ROUTER_MAC[i]); if(i<5) Serial.print(":"); }
-    Serial.println();
-
-    Serial.printf("Intruder Detection Mode: %s\n", ENABLE_INTRUDER_MODE ? "Enabled" : "Disabled");
-    if (ENABLE_INTRUDER_MODE) {
-        Serial.printf("Intruder Detection Arms After: %d seconds\n", INTRUDER_MODE_ARM_DELAY_S);
-        Serial.printf("Intruder Alert Duration: %d seconds\n", INTRUDER_ALERT_DURATION_S);
-    }
-    Serial.println("-------------------------------");
-
-
-    xTaskCreatePinnedToCore(
-        led_update_task, "LEDUpdateTask", 4096, NULL, 2, NULL, tskNO_AFFINITY);
-}
-
-// --- Arduino Loop Function ---
-void loop() {
-    vTaskDelay(pdMS_TO_TICKS(1000));
 }
