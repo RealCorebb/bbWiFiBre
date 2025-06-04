@@ -220,7 +220,7 @@ void setup() {
     Serial.println("  mode3 - RSSI Mode");
 
     strip.begin();
-    strip.setBrightness(220); // Adjust brightness as needed
+    strip.setBrightness(200); // Adjust brightness as needed
     strip.show();
 
     WiFi.mode(WIFI_STA); // Initialize WiFi stack

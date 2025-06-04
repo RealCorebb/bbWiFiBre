@@ -33,18 +33,18 @@ const uint16_t HUE_FORCE_RED    = 0;
 
 // --- Idle LED Effect Tuning (for unused device slots) ---
 const bool ENABLE_IDLE_EFFECT = true;
-const float IDLE_BREATH_SPEED = 1.0f;
+const float IDLE_BREATH_SPEED = 1.5f;
 const float IDLE_COLUMN_PHASE_OFFSET = 0.5f;
 const uint8_t IDLE_MIN_BRIGHTNESS = 10;
 const uint8_t IDLE_MAX_BRIGHTNESS = 35;
-const uint8_t IDLE_R1 = 14, IDLE_G1 = 0, IDLE_B1 = 15;
-const uint8_t IDLE_R2 = 14, IDLE_G2 = 0, IDLE_B2 = 15;
+const uint8_t IDLE_R1 = 10, IDLE_G1 = 0, IDLE_B1 = 15;
+const uint8_t IDLE_R2 = 0, IDLE_G2 = 10, IDLE_B2 = 15;
 //==================================================================================
 
 // --- Intruder Mode Configuration ---
 const bool ENABLE_INTRUDER_MODE = true; // Set to true to enable intruder detection
-const int INTRUDER_MODE_ARM_DELAY_S = 30; // Seconds after boot to arm intruder detection
-const int INTRUDER_ALERT_DURATION_S = 10; // Seconds to show red alert
+const int INTRUDER_MODE_ARM_DELAY_S = 20; // Seconds after boot to arm intruder detection
+const int INTRUDER_ALERT_DURATION_S = 4; // Seconds to show red alert
 
 // --- Intruder Mode State Variables ---
 volatile bool g_intruder_detection_armed = false;
@@ -209,7 +209,6 @@ uint32_t getActivityColor(float activityScore, float maxScoreToNormalizeAgainst)
     return strip.ColorHSV(hue, 255, brightness_val);
 }
 
-
 // --- LED Update Task (RTOS Task) ---
 void led_update_task(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -217,6 +216,12 @@ void led_update_task(void *pvParameters) {
     const unsigned long arm_delay_ms = (unsigned long)INTRUDER_MODE_ARM_DELAY_S * 1000;
     const unsigned long alert_duration_ms = (unsigned long)INTRUDER_ALERT_DURATION_S * 1000;
     bool current_cycle_is_alert = false;
+
+    // --- Parameters for Pulsing Intruder Alert ---
+    const float ALERT_PULSE_FREQUENCY_HZ = 1.5f;     // How many pulses per second (e.g., 0.5f for slow, 1.0f for moderate, 2.0f for fast)
+    const uint8_t ALERT_MIN_PULSE_BRIGHTNESS = 30;   // Minimum brightness during a pulse (0-255)
+    const uint8_t ALERT_MAX_PULSE_BRIGHTNESS = 255;  // Maximum brightness during a pulse (0-255)
+    // PI constant, ensure math.h provides it or define it: #ifndef PI #define PI 3.1415926535f #endif
 
     for (;;) {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -230,7 +235,7 @@ void led_update_task(void *pvParameters) {
             }
         }
 
-        // --- Intruder Alert Display Logic ---
+        // --- Intruder Alert Active Check ---
         current_cycle_is_alert = false;
         if (ENABLE_INTRUDER_MODE && g_intruder_alert_active) {
             if (currentTime - g_intruder_alert_start_time_ms < alert_duration_ms) {
@@ -238,18 +243,33 @@ void led_update_task(void *pvParameters) {
             } else {
                 g_intruder_alert_active = false; // Alert period ended
                 Serial.println(">>> Intruder Alert Ended <<<");
+                // Optional: You could add a short fade-out effect here for a few cycles
+                // before fully reverting to normal display. For now, it will switch back directly.
             }
         }
 
         if (xSemaphoreTake(deviceDataMutex, portMAX_DELAY) == pdTRUE) {
             if (current_cycle_is_alert) {
-                // --- Show Intruder Alert Effect ---
+                // --- Show Pulsing Intruder Alert Effect ---
+                unsigned long time_since_alert_start = currentTime - g_intruder_alert_start_time_ms;
+                
+                // Calculate angular frequency for the sine wave based on desired Hz
+                float pulse_angular_frequency = 2.0f * PI * ALERT_PULSE_FREQUENCY_HZ;
+                
+                // Calculate normalized brightness (0.0 to 1.0) using a sine wave.
+                // The "- (PI / 2.0f)" phase shift makes the sine wave start at -1 (its minimum),
+                // so the pulse starts from its dimmest and brightens up.
+                float normalized_brightness = (sinf( (float)time_since_alert_start / 1000.0f * pulse_angular_frequency - (PI / 2.0f) ) + 1.0f) / 2.0f;
+                
+                // Scale normalized brightness to the desired min/max range
+                uint8_t current_pulse_brightness = ALERT_MIN_PULSE_BRIGHTNESS + 
+                                                   (uint8_t)(normalized_brightness * (ALERT_MAX_PULSE_BRIGHTNESS - ALERT_MIN_PULSE_BRIGHTNESS));
+
                 for (int i = 0; i < NUM_LEDS; i++) {
-                    // Solid Red Alert
-                    strip.setPixelColor(i, strip.Color(255, 0, 0));
+                    strip.setPixelColor(i, strip.Color(current_pulse_brightness, 0, 0)); // Pulsing Red
                 }
             } else {
-                // --- Normal LED Update Logic ---
+                // --- Normal LED Update Logic (remains the same as before) ---
                 for (int i = 0; i < MAX_CLIENT_DEVICES; i++) {
                     if (trackedClientDevices[i].isActive) {
                         trackedClientDevices[i].activityScoreToAP *= ACTIVITY_DECAY_FACTOR;
@@ -264,7 +284,7 @@ void led_update_task(void *pvParameters) {
                         if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS) {
                             if (trackedClientDevices[i].activityScoreToAP == 0 && trackedClientDevices[i].activityScoreFromAP == 0) {
                                  trackedClientDevices[i].isActive = false;
-                            } else if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS + 20000) { // Extra grace period if still has score
+                            } else if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS + 20000) { 
                                 trackedClientDevices[i].isActive = false;
                             }
                         }
@@ -282,7 +302,7 @@ void led_update_task(void *pvParameters) {
 
                     } else {
                         if (ENABLE_IDLE_EFFECT) {
-                            float time_val_rad = (float)millis() / 1000.0f * IDLE_BREATH_SPEED;
+                            float time_val_rad = (float)millis() / 1000.0f * IDLE_BREATH_SPEED; // millis() is okay here, it's for animation phase
                             float breath_normalized_brightness = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET) + 1.0f) / 2.0f;
                             uint8_t current_breath_brightness = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
                             uint32_t idle_color_row1 = scaleColorBrightness(IDLE_R1, IDLE_G1, IDLE_B1, current_breath_brightness);
