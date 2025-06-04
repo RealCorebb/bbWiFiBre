@@ -50,4 +50,13 @@ void onWiFiPacket(void* buf, wifi_promiscuous_pkt_type_t type);
 void LEDUpdateTask(void *pvParameters);
 void ChannelTask(void *pvParameters);
 
+// --- Mode 3 (RSSI) specific declarations ---
+extern SemaphoreHandle_t g_rssiDataMutex;
+extern volatile int g_latestRSSI;
+extern volatile bool g_routerIsVisible;
+extern float g_smoothedRSSI;
+void RSSIUpdateTask(void *pvParameters);
+void process_wifi_scan_results(int num_networks_found);
+void update_router_visibility_status(bool found, int rssi_value);
+
 #endif // BB_WIFI_BRE_H
