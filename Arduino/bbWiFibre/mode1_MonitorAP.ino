@@ -1,5 +1,4 @@
 // --- General LED & Task Config ---
-const int LED_BRIGHTNESS = 200;
 const unsigned long DEVICE_TIMEOUT_MS = 90000;
 
 //==================================================================================
@@ -38,8 +37,8 @@ const float IDLE_BREATH_SPEED = 1.0f;
 const float IDLE_COLUMN_PHASE_OFFSET = 0.5f;
 const uint8_t IDLE_MIN_BRIGHTNESS = 10;
 const uint8_t IDLE_MAX_BRIGHTNESS = 35;
-const uint8_t IDLE_R1 = 5, IDLE_G1 = 0, IDLE_B1 = 20;
-const uint8_t IDLE_R2 = 0, IDLE_G2 = 5, IDLE_B2 = 20;
+const uint8_t IDLE_R1 = 14, IDLE_G1 = 0, IDLE_B1 = 15;
+const uint8_t IDLE_R2 = 14, IDLE_G2 = 0, IDLE_B2 = 15;
 //==================================================================================
 
 // --- Intruder Mode Configuration ---

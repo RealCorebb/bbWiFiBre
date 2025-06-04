@@ -26,7 +26,7 @@ void setup() {
     Serial.println("  mode2 - Channel Scan Mode");
     
     strip.begin();
-    strip.setBrightness(80);
+    strip.setBrightness(200);
     strip.show();
 
     // Initialize WiFi in station mode

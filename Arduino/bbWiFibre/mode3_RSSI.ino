@@ -1,17 +1,4 @@
-#include <WiFi.h>
-#include <esp_wifi.h> // For esp_wifi_scan_start
-#include <Adafruit_NeoPixel.h>
-#include <string.h>   // For memcmp
-#include <math.h>     // For fmin, fmax, sinf
-
-// --- WiFi Configuration ---
-// << (!!! REQUIRED !!!) REPLACE WITH YOUR ROUTER'S ACTUAL MAC ADDRESS >>
-const uint8_t TARGET_ROUTER_MAC[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-// << (RECOMMENDED) SET YOUR ROUTER'S 2.4GHz CHANNEL (1-13), OR 0 TO SCAN ALL CHANNELS >>
-const uint8_t TARGET_ROUTER_CHANNEL = 0; // 0 scans all, 1-13 targets a specific channel
-
 // --- LED Configuration ---
-#define LED_PIN 10
 #define NUM_RSSI_SLOTS 13 // We have 13 "columns" or slots to display RSSI
 #define NUM_LEDS (NUM_RSSI_SLOTS * 2) // Each slot uses 2 LEDs (one per row)
 const int GLOBAL_LED_BRIGHTNESS = 90; // Global brightness for the strip (0-255)
@@ -84,9 +71,9 @@ void setup() {
     WiFi.disconnect(); // Ensure we are not connected to any network
 
     Serial.print("Target Router MAC: ");
-    for(int i=0; i<6; ++i) { Serial.printf("%02X", TARGET_ROUTER_MAC[i]); if(i<5) Serial.print(":"); }
+    for(int i=0; i<6; ++i) { Serial.printf("%02X", ROUTER_MAC[i]); if(i<5) Serial.print(":"); }
     Serial.println();
-    Serial.printf("Target Router Channel (0 for all): %d\n", TARGET_ROUTER_CHANNEL);
+    Serial.printf("Target Router Channel (0 for all): %d\n", WIFI_CHANNEL);
 
     // Create LED update task
     xTaskCreatePinnedToCore(
@@ -104,7 +91,7 @@ void loop() {
     if (!g_scanIsOngoing && (millis() - g_lastScanInitiationTime > WIFI_SCAN_INTERVAL_MS)) {
         Serial.println("Initiating WiFi scan...");
         // Asynchronous scan. Args: (async, show_hidden, passive, max_ms_per_chan, channel)
-        WiFi.scanNetworks(true, false, false, 250, TARGET_ROUTER_CHANNEL);
+        WiFi.scanNetworks(true, false, false, 250, WIFI_CHANNEL);
         g_scanIsOngoing = true;
         g_lastScanInitiationTime = millis();
     }
@@ -132,7 +119,7 @@ void process_wifi_scan_results(int num_networks_found) {
     int rssi_this_scan = RSSI_MIN_THRESHOLD - 1;
 
     for (int i = 0; i < num_networks_found; ++i) {
-        if (memcmp(WiFi.BSSID(i), TARGET_ROUTER_MAC, 6) == 0) {
+        if (memcmp(WiFi.BSSID(i), ROUTER_MAC, 6) == 0) {
             rssi_this_scan = WiFi.RSSI(i);
             found_this_scan = true;
             Serial.printf("Target router '%s' FOUND with RSSI: %d dBm\n", WiFi.SSID(i).c_str(), rssi_this_scan);
