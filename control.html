@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Monitor Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .title {
+            color: white;
+            font-size: 28px;
+            font-weight: 300;
+            margin-bottom: 40px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .status-indicator.connected {
+            background: #4CAF50;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+
+        .status-indicator.disconnected {
+            background: #f44336;
+            box-shadow: 0 0 10px rgba(244, 67, 54, 0.5);
+        }
+
+        .connect-section {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .connect-btn {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 50px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            min-width: 140px;
+        }
+
+        .connect-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .connect-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .controls {
+            opacity: 0.3;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+
+        .controls.enabled {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .mode-section {
+            margin-bottom: 40px;
+        }
+
+        .section-title {
+            color: white;
+            font-size: 18px;
+            margin-bottom: 20px;
+            font-weight: 300;
+        }
+
+        .mode-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .mode-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            width: 80px;
+            height: 80px;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .mode-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(45deg, #FF6B6B, #FF8E53);
+            border-color: #FF6B6B;
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.4);
+        }
+
+        .mode-btn .icon {
+            margin-bottom: 5px;
+        }
+
+        .mode-btn .label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.8;
+        }
+
+        .brightness-section {
+            margin-top: 30px;
+        }
+
+        .brightness-control {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .brightness-icon {
+            color: white;
+            font-size: 20px;
+            opacity: 0.7;
+        }
+
+        .brightness-slider {
+            -webkit-appearance: none;
+            width: 200px;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.3);
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .brightness-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #FFD93D, #FF6B6B);
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .brightness-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .brightness-value {
+            color: white;
+            font-size: 14px;
+            min-width: 40px;
+            font-weight: 500;
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            transform: translateX(400px);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            .mode-buttons {
+                gap: 10px;
+            }
+            
+            .mode-btn {
+                width: 70px;
+                height: 70px;
+                font-size: 20px;
+            }
+            
+            .brightness-slider {
+                width: 150px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">
+            <span class="status-indicator disconnected" id="statusIndicator"></span>
+            WiFi Monitor
+        </div>
+
+        <div class="connect-section">
+            <button class="connect-btn" id="connectUsbBtn">🔌 USB Serial</button>
+            <button class="connect-btn" id="connectBleBtn">📱 Bluetooth LE</button>
+        </div>
+
+        <div class="controls" id="controls">
+            <div class="mode-section">
+                <div class="section-title">📡 Mode</div>
+                <div class="mode-buttons">
+                    <button class="mode-btn" data-mode="mode1" id="mode1">
+                        <div class="icon">🎯</div>
+                        <div class="label">Monitor</div>
+                    </button>
+                    <button class="mode-btn" data-mode="mode2" id="mode2">
+                        <div class="icon">📊</div>
+                        <div class="label">Scan</div>
+                    </button>
+                    <button class="mode-btn" data-mode="mode3" id="mode3">
+                        <div class="icon">📶</div>
+                        <div class="label">RSSI</div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="brightness-section">
+                <div class="section-title">💡 Brightness</div>
+                <div class="brightness-control">
+                    <div class="brightness-icon">🔅</div>
+                    <input type="range" class="brightness-slider" id="brightnessSlider" 
+                           min="10" max="255" value="200" step="5">
+                    <div class="brightness-icon">🔆</div>
+                    <div class="brightness-value" id="brightnessValue">200</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="notification" id="notification"></div>
+
+    <script>
+        let port = null;
+        let bluetoothDevice = null;
+        let bluetoothCharacteristic = null;
+        let isConnected = false;
+        let connectionType = null; // 'usb' or 'bluetooth'
+        let currentMode = 'mode1';
+
+        // BLE service and characteristic UUIDs (matching your Arduino code)
+        const BLE_SERVICE_UUID = '12345678-1234-1234-1234-123456789abc';
+        const BLE_CHARACTERISTIC_UUID = '87654321-4321-4321-4321-cba987654321';
+
+        const connectUsbBtn = document.getElementById('connectUsbBtn');
+        const connectBleBtn = document.getElementById('connectBleBtn');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const controls = document.getElementById('controls');
+        const modeButtons = document.querySelectorAll('.mode-btn');
+        const brightnessSlider = document.getElementById('brightnessSlider');
+        const brightnessValue = document.getElementById('brightnessValue');
+        const notification = document.getElementById('notification');
+
+        // Check API support
+        if (!navigator.serial) {
+            connectUsbBtn.disabled = true;
+            connectUsbBtn.textContent = '❌ Not Supported';
+        }
+
+        if (!navigator.bluetooth) {
+            connectBleBtn.disabled = true;
+            connectBleBtn.textContent = '❌ Not Supported';
+        }
+
+        // USB Serial connection
+        connectUsbBtn.addEventListener('click', async () => {
+            if (!isConnected || connectionType !== 'usb') {
+                await connectUSB();
+            } else {
+                await disconnect();
+            }
+        });
+
+        // Bluetooth LE connection
+        connectBleBtn.addEventListener('click', async () => {
+            if (!isConnected || connectionType !== 'bluetooth') {
+                await connectBluetooth();
+            } else {
+                await disconnect();
+            }
+        });
+
+        async function connectUSB() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ 
+                    baudRate: 115200,
+                    dataBits: 8,
+                    stopBits: 1,
+                    parity: 'none'
+                });
+
+                isConnected = true;
+                connectionType = 'usb';
+                updateConnectionStatus();
+                showNotification('✅ USB Connected!', 'success');
+                readFromUSB();
+                
+            } catch (error) {
+                console.error('USB connection failed:', error);
+                showNotification('❌ USB connection failed: ' + error.message, 'error');
+            }
+        }
+
+        async function connectBluetooth() {
+            try {
+                console.log('Requesting Bluetooth Device...');
+                
+                // Request Bluetooth device with the correct device name
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'bbWiFibre-BLE' }],
+                    optionalServices: [BLE_SERVICE_UUID]
+                });
+
+                console.log('Connecting to GATT Server...');
+                const server = await bluetoothDevice.gatt.connect();
+                
+                console.log('Getting Primary Service...');
+                const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                
+                console.log('Getting Characteristic...');
+                bluetoothCharacteristic = await service.getCharacteristic(BLE_CHARACTERISTIC_UUID);
+
+                // Start notifications for receiving data from ESP32
+                await bluetoothCharacteristic.startNotifications();
+                bluetoothCharacteristic.addEventListener('characteristicvaluechanged', handleBluetoothData);
+
+                isConnected = true;
+                connectionType = 'bluetooth';
+                updateConnectionStatus();
+                showNotification('✅ Bluetooth LE Connected!', 'success');
+
+                // Handle disconnection
+                bluetoothDevice.addEventListener('gattserverdisconnected', () => {
+                    console.log('Bluetooth device disconnected');
+                    isConnected = false;
+                    connectionType = null;
+                    bluetoothDevice = null;
+                    bluetoothCharacteristic = null;
+                    updateConnectionStatus();
+                    showNotification('📱 Bluetooth LE Disconnected', 'info');
+                });
+                
+            } catch (error) {
+                console.error('Bluetooth LE connection failed:', error);
+                showNotification('❌ Bluetooth LE connection failed: ' + error.message, 'error');
+            }
+        }
+
+        async function disconnect() {
+            if (connectionType === 'usb' && port) {
+                try {
+                    await port.close();
+                    port = null;
+                } catch (error) {
+                    console.error('USB disconnect failed:', error);
+                }
+            } else if (connectionType === 'bluetooth' && bluetoothDevice) {
+                try {
+                    if (bluetoothDevice.gatt.connected) {
+                        bluetoothDevice.gatt.disconnect();
+                    }
+                    bluetoothDevice = null;
+                    bluetoothCharacteristic = null;
+                } catch (error) {
+                    console.error('Bluetooth disconnect failed:', error);
+                }
+            }
+            
+            isConnected = false;
+            connectionType = null;
+            updateConnectionStatus();
+            showNotification('📱 Disconnected', 'info');
+        }
+
+        async function readFromUSB() {
+            if (!port) return;
+            
+            try {
+                const textDecoder = new TextDecoderStream();
+                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+                const reader = textDecoder.readable.getReader();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        reader.releaseLock();
+                        break;
+                    }
+                    console.log('USB Received:', value);
+                }
+            } catch (error) {
+                console.error('USB read error:', error);
+            }
+        }
+
+        function handleBluetoothData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            console.log('Bluetooth LE Received:', value);
+            
+            // Show received messages as notifications (optional)
+            if (value.trim().length > 0) {
+                showNotification('📱 ' + value.trim(), 'info');
+            }
+        }
+
+        async function sendCommand(command) {
+            if (!isConnected) {
+                showNotification('❌ Device not connected', 'error');
+                return;
+            }
+
+            try {
+                if (connectionType === 'usb' && port) {
+                    const writer = port.writable.getWriter();
+                    const encoder = new TextEncoder();
+                    await writer.write(encoder.encode(command + '\n'));
+                    writer.releaseLock();
+                } else if (connectionType === 'bluetooth' && bluetoothCharacteristic) {
+                    const encoder = new TextEncoder();
+                    const data = encoder.encode(command);
+                    
+                    // BLE has a maximum packet size, so we might need to split large commands
+                    // For most commands this won't be necessary, but it's good practice
+                    const maxPacketSize = 20; // Conservative BLE packet size
+                    
+                    if (data.length <= maxPacketSize) {
+                        await bluetoothCharacteristic.writeValue(data);
+                    } else {
+                        // Split into chunks if needed
+                        for (let i = 0; i < data.length; i += maxPacketSize) {
+                            const chunk = data.slice(i, i + maxPacketSize);
+                            await bluetoothCharacteristic.writeValue(chunk);
+                            await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between chunks
+                        }
+                    }
+                }
+                console.log('Sent command:', command);
+            } catch (error) {
+                console.error('Send error:', error);
+                showNotification('❌ Failed to send command: ' + error.message, 'error');
+            }
+        }
+
+        function updateConnectionStatus() {
+            if (isConnected) {
+                statusIndicator.className = 'status-indicator connected';
+                controls.classList.add('enabled');
+                
+                // Update button states
+                if (connectionType === 'usb') {
+                    connectUsbBtn.textContent = '🔌 Disconnect USB';
+                    connectUsbBtn.style.background = 'linear-gradient(45deg, #f44336, #d32f2f)';
+                    connectBleBtn.textContent = '📱 Bluetooth LE';
+                    connectBleBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                } else if (connectionType === 'bluetooth') {
+                    connectBleBtn.textContent = '📱 Disconnect BLE';
+                    connectBleBtn.style.background = 'linear-gradient(45deg, #f44336, #d32f2f)';
+                    connectUsbBtn.textContent = '🔌 USB Serial';
+                    connectUsbBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                }
+            } else {
+                statusIndicator.className = 'status-indicator disconnected';
+                controls.classList.remove('enabled');
+                
+                // Reset button states
+                connectUsbBtn.textContent = '🔌 USB Serial';
+                connectUsbBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                connectBleBtn.textContent = '📱 Bluetooth LE';
+                connectBleBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            notification.textContent = message;
+            notification.className = 'notification show';
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Mode button handlers
+        modeButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const mode = button.dataset.mode;
+                if (mode !== currentMode) {
+                    // Remove active class from all buttons
+                    modeButtons.forEach(btn => btn.classList.remove('active'));
+                    // Add active class to clicked button
+                    button.classList.add('active');
+                    
+                    currentMode = mode;
+                    sendCommand(mode);
+                    
+                    const modeNames = {
+                        'mode1': 'Monitor AP',
+                        'mode2': 'Channel Scan',
+                        'mode3': 'RSSI Mode'
+                    };
+                    showNotification(`📡 Switched to ${modeNames[mode]}`, 'success');
+                }
+            });
+        });
+
+        // Brightness slider handler
+        brightnessSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            brightnessValue.textContent = value;
+            
+            // Send brightness command to ESP32
+            sendCommand(`brightness:${value}`);
+            console.log('Brightness changed to:', value);
+        });
+
+        // Set initial mode as active
+        document.getElementById('mode1').classList.add('active');
+
+        // Add some visual feedback
+        modeButtons.forEach(button => {
+            button.addEventListener('mouseenter', () => {
+                if (!button.classList.contains('active')) {
+                    button.style.background = 'rgba(255, 255, 255, 0.2)';
+                }
+            });
+            
+            button.addEventListener('mouseleave', () => {
+                if (!button.classList.contains('active')) {
+                    button.style.background = 'rgba(255, 255, 255, 0.1)';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

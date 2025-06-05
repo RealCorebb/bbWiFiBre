@@ -1,5 +1,19 @@
 #include "bbWiFiBre.h"
 #include <Preferences.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+// BLE UUIDs
+#define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
+#define CHARACTERISTIC_UUID "87654321-4321-4321-4321-cba987654321"
+
+// BLE objects
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 
 // Mode definitions
 #define MODE_MONITOR_AP 1
@@ -11,14 +25,106 @@ Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 volatile int currentMode = MODE_MONITOR_AP;
 TaskHandle_t modeTaskHandle = NULL;
 TaskHandle_t channelTaskHandle = NULL;  // Added for mode2's second task
+int currentBrightness = 200; // Default brightness
 
 Preferences preferences;
+
+// Forward declaration
+void processSerialCommand(String command);
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+        Serial.println("BLE Client connected");
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+        Serial.println("BLE Client disconnected");
+    }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        String rxValue = pCharacteristic->getValue();
+        if (rxValue.length() > 0) {
+            Serial.println("BLE Command received: " + rxValue);
+            processSerialCommand(rxValue);
+        }
+    }
+};
+
+void initBLE() {
+    BLEDevice::init("bbWiFibre-BLE");
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    pCharacteristic = pService->createCharacteristic(
+                         CHARACTERISTIC_UUID,
+                         BLECharacteristic::PROPERTY_READ   |
+                         BLECharacteristic::PROPERTY_WRITE  |
+                         BLECharacteristic::PROPERTY_NOTIFY |
+                         BLECharacteristic::PROPERTY_INDICATE
+                       );
+
+    pCharacteristic->setCallbacks(new MyCallbacks());
+    pCharacteristic->addDescriptor(new BLE2902());
+
+    pService->start();
+    
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(false);
+    pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
+    BLEDevice::startAdvertising();
+    
+    Serial.println("BLE service started, waiting for connections...");
+}
+
+void sendBLEMessage(String message) {
+    if (deviceConnected && pCharacteristic) {
+        pCharacteristic->setValue(message.c_str());
+        pCharacteristic->notify();
+    }
+}
 
 void saveCurrentMode() {
     preferences.begin("appState", false);
     preferences.putInt("lastMode", currentMode);
     preferences.end();
     Serial.printf("Saved mode %d to NVS.\n", currentMode);
+}
+
+void saveBrightness() {
+    preferences.begin("appState", false);
+    preferences.putInt("brightness", currentBrightness);
+    preferences.end();
+    Serial.printf("Saved brightness %d to NVS.\n", currentBrightness);
+}
+
+void loadBrightness() {
+    preferences.begin("appState", true); // Read-only
+    currentBrightness = preferences.getInt("brightness", 200); // Default to 200 if not found
+    preferences.end();
+    Serial.printf("Loaded brightness %d from NVS.\n", currentBrightness);
+    
+    // Apply the loaded brightness
+    strip.setBrightness(currentBrightness);
+    strip.show();
+}
+
+void setBrightness(int brightness) {
+    if (brightness >= 10 && brightness <= 255) {
+        currentBrightness = brightness;
+        strip.setBrightness(currentBrightness);
+        strip.show();
+        saveBrightness();
+        Serial.printf("Brightness set to: %d\n", currentBrightness);
+    } else {
+        Serial.printf("Invalid brightness value: %d. Must be between 10-255.\n", brightness);
+    }
 }
 
 void stopCurrentMode() {
@@ -175,53 +281,96 @@ void startRSSIMode() {
     saveCurrentMode();
 }
 
+void processSerialCommand(String command) {
+    command.trim();
+
+    if (command == "mode1") {
+        if (currentMode != MODE_MONITOR_AP) {
+            startMonitorAPMode();
+        } else {
+            Serial.println("Already in Monitor AP Mode");
+            sendBLEMessage("Already in Monitor AP Mode");
+        }
+    } else if (command == "mode2") {
+        if (currentMode != MODE_SCAN_CHANNEL) {
+            startScanChannelMode();
+        } else {
+            Serial.println("Already in Channel Scan Mode");
+            sendBLEMessage("Already in Channel Scan Mode");
+        }
+    } else if (command == "mode3") {
+        if (currentMode != MODE_RSSI) {
+            startRSSIMode();
+        } else {
+            Serial.println("Already in RSSI Mode");
+            sendBLEMessage("Already in RSSI Mode");
+        }
+    } else if (command.startsWith("brightness:")) {
+        int brightness = command.substring(11).toInt();
+        setBrightness(brightness);
+    } else if (command == "status") {
+        // Additional command to check current settings
+        String statusMsg = "Current Mode: " + String(currentMode) + ", Brightness: " + String(currentBrightness);
+        Serial.println(statusMsg);
+        sendBLEMessage(statusMsg);
+    } else {
+        String helpMsg = "Invalid command. Use 'mode1', 'mode2', 'mode3', 'brightness:XXX', or 'status'";
+        Serial.println(helpMsg);
+        sendBLEMessage(helpMsg);
+    }
+}
+
 void serialCommandTask(void* parameter) {
     while (true) {
+        // Check USB Serial
         if (Serial.available()) {
             String command = Serial.readStringUntil('\n');
-            command.trim();
-
-            if (command == "mode1") {
-                if (currentMode != MODE_MONITOR_AP) {
-                    startMonitorAPMode();
-                } else {
-                    Serial.println("Already in Monitor AP Mode");
-                }
-            } else if (command == "mode2") {
-                if (currentMode != MODE_SCAN_CHANNEL) {
-                    startScanChannelMode();
-                } else {
-                    Serial.println("Already in Channel Scan Mode");
-                }
-            } else if (command == "mode3") {
-                if (currentMode != MODE_RSSI) {
-                    startRSSIMode();
-                } else {
-                    Serial.println("Already in RSSI Mode");
-                }
-            } else {
-                Serial.println("Invalid command. Use 'mode1', 'mode2', or 'mode3'");
-            }
-             vTaskDelay(pdMS_TO_TICKS(50)); // Small delay to allow mode to settle if changed
+            processSerialCommand(command);
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
+        
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
+void bleConnectionTask(void* parameter) {
+    while (true) {
+        // Handle BLE disconnection/reconnection
+        if (!deviceConnected && oldDeviceConnected) {
+            vTaskDelay(pdMS_TO_TICKS(500)); // give the bluetooth stack the chance to get things ready
+            pServer->startAdvertising(); // restart advertising
+            Serial.println("Start advertising");
+            oldDeviceConnected = deviceConnected;
+        }
+        
+        // Handle new BLE connection
+        if (deviceConnected && !oldDeviceConnected) {
+            oldDeviceConnected = deviceConnected;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
 
 void setup() {
     Serial.begin(115200);
     while (!Serial) { delay(10); }
 
-    Serial.println("bbWiFiBre - Multi-mode WiFi Monitor");
+    Serial.println("bbWiFiBre - Multi-mode WiFi Monitor with BLE");
     Serial.println("Commands:");
     Serial.println("  mode1 - Monitor AP Mode");
     Serial.println("  mode2 - Channel Scan Mode");
     Serial.println("  mode3 - RSSI Mode");
+    Serial.println("  brightness:XXX - Set brightness (10-255)");
+    Serial.println("  status - Show current settings");
+
+    // Initialize BLE
+    initBLE();
 
     strip.begin();
-    strip.setBrightness(200); // Adjust brightness as needed
-    strip.show();
+    
+    // Load saved brightness before setting it
+    loadBrightness();
 
     WiFi.mode(WIFI_STA); // Initialize WiFi stack
     WiFi.disconnect();   // Disconnect from any previous network
@@ -233,6 +382,9 @@ void setup() {
 
     // Create a task for Serial command monitoring
     xTaskCreate(serialCommandTask, "SerialCommand", 4096, NULL, 1, NULL);
+    
+    // Create a task for BLE connection management
+    xTaskCreate(bleConnectionTask, "BLEConnection", 4096, NULL, 1, NULL);
 
     delay(1000); // Allow serial task to initialize, etc.
 
@@ -247,7 +399,6 @@ void setup() {
         startMonitorAPMode();
     }
 }
-
 
 void loop() {
     // Main loop is not used as we're using FreeRTOS tasks
