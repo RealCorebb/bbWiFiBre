@@ -211,23 +211,54 @@ uint32_t getActivityColor(float activityScore, float maxScoreToNormalizeAgainst)
 
 // --- LED Update Task (RTOS Task) ---
 void led_update_task(void *pvParameters) {
+    // --- State Machine & Transition Configuration ---
+    enum LedDisplayState { STATE_NORMAL, STATE_INTRUDER_ALERT, STATE_ALERT_FADEOUT };
+    LedDisplayState led_state = STATE_NORMAL;
+    const unsigned long FADEOUT_DURATION_MS = 1200; // Duration of the fade-out transition in milliseconds
+    unsigned long fadeout_start_time_ms = 0;
+
+    // --- RTOS & Alert Timing ---
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(LED_UPDATE_INTERVAL_MS);
     const unsigned long arm_delay_ms = (unsigned long)INTRUDER_MODE_ARM_DELAY_S * 1000;
     const unsigned long alert_duration_ms = (unsigned long)INTRUDER_ALERT_DURATION_S * 1000;
-    bool current_cycle_is_alert = false;
 
     // --- Parameters for Pulsing Intruder Alert ---
-    const float ALERT_PULSE_FREQUENCY_HZ = 1.5f;     // How many pulses per second (e.g., 0.5f for slow, 1.0f for moderate, 2.0f for fast)
-    const uint8_t ALERT_MIN_PULSE_BRIGHTNESS = 30;   // Minimum brightness during a pulse (0-255)
-    const uint8_t ALERT_MAX_PULSE_BRIGHTNESS = 255;  // Maximum brightness during a pulse (0-255)
-    // PI constant, ensure math.h provides it or define it: #ifndef PI #define PI 3.1415926535f #endif
+    const float ALERT_PULSE_FREQUENCY_HZ = 0.8f;
+    const uint8_t ALERT_MIN_PULSE_BRIGHTNESS = 30;
+    const uint8_t ALERT_MAX_PULSE_BRIGHTNESS = 255;
 
     for (;;) {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        unsigned long currentTime = millis(); // Cache current time for this cycle
+        unsigned long currentTime = millis();
 
-        // --- Intruder Mode Arming Logic ---
+        // --- 1. STATE MANAGEMENT ---
+        // Handle transitions between Normal -> Alert -> FadeOut -> Normal
+        
+        // Check if a new alert has been triggered
+        if (g_intruder_alert_active && led_state == STATE_NORMAL) {
+            led_state = STATE_INTRUDER_ALERT;
+        }
+
+        // Check if the alert duration has finished to begin the fade-out
+        if (led_state == STATE_INTRUDER_ALERT) {
+            if (currentTime - g_intruder_alert_start_time_ms >= alert_duration_ms) {
+                led_state = STATE_ALERT_FADEOUT;
+                fadeout_start_time_ms = currentTime;
+                g_intruder_alert_active = false; // Clear the trigger flag
+                Serial.println(">>> Intruder Alert Ended, Fading Out... <<<");
+            }
+        }
+
+        // Check if the fade-out duration is finished
+        if (led_state == STATE_ALERT_FADEOUT) {
+            if (currentTime - fadeout_start_time_ms >= FADEOUT_DURATION_MS) {
+                led_state = STATE_NORMAL;
+                Serial.println(">>> Fade Out Complete, Normal Display Resumed <<<");
+            }
+        }
+
+        // Arm intruder detection logic (this is independent of the display state)
         if (ENABLE_INTRUDER_MODE && !g_intruder_detection_armed) {
             if (currentTime - g_esp_boot_time_ms > arm_delay_ms) {
                 g_intruder_detection_armed = true;
@@ -235,90 +266,116 @@ void led_update_task(void *pvParameters) {
             }
         }
 
-        // --- Intruder Alert Active Check ---
-        current_cycle_is_alert = false;
-        if (ENABLE_INTRUDER_MODE && g_intruder_alert_active) {
-            if (currentTime - g_intruder_alert_start_time_ms < alert_duration_ms) {
-                current_cycle_is_alert = true;
-            } else {
-                g_intruder_alert_active = false; // Alert period ended
-                Serial.println(">>> Intruder Alert Ended <<<");
-                // Optional: You could add a short fade-out effect here for a few cycles
-                // before fully reverting to normal display. For now, it will switch back directly.
-            }
-        }
-
         if (xSemaphoreTake(deviceDataMutex, portMAX_DELAY) == pdTRUE) {
-            if (current_cycle_is_alert) {
-                // --- Show Pulsing Intruder Alert Effect ---
-                unsigned long time_since_alert_start = currentTime - g_intruder_alert_start_time_ms;
-                
-                // Calculate angular frequency for the sine wave based on desired Hz
-                float pulse_angular_frequency = 2.0f * PI * ALERT_PULSE_FREQUENCY_HZ;
-                
-                // Calculate normalized brightness (0.0 to 1.0) using a sine wave.
-                // The "- (PI / 2.0f)" phase shift makes the sine wave start at -1 (its minimum),
-                // so the pulse starts from its dimmest and brightens up.
-                float normalized_brightness = (sinf( (float)time_since_alert_start / 1000.0f * pulse_angular_frequency - (PI / 2.0f) ) + 1.0f) / 2.0f;
-                
-                // Scale normalized brightness to the desired min/max range
-                uint8_t current_pulse_brightness = ALERT_MIN_PULSE_BRIGHTNESS + 
-                                                   (uint8_t)(normalized_brightness * (ALERT_MAX_PULSE_BRIGHTNESS - ALERT_MIN_PULSE_BRIGHTNESS));
+            // --- 2. DATA UPDATE ---
+            // Always decay scores and check timeouts, regardless of display state.
+            // This ensures the data is fresh when we fade back to normal.
+            for (int i = 0; i < MAX_CLIENT_DEVICES; i++) {
+                if (trackedClientDevices[i].isActive) {
+                    trackedClientDevices[i].activityScoreToAP *= ACTIVITY_DECAY_FACTOR;
+                    if (trackedClientDevices[i].activityScoreToAP < 0.5f) trackedClientDevices[i].activityScoreToAP = 0;
+                    
+                    trackedClientDevices[i].activityScoreFromAP *= ACTIVITY_DECAY_FACTOR;
+                    if (trackedClientDevices[i].activityScoreFromAP < 0.5f) trackedClientDevices[i].activityScoreFromAP = 0;
 
-                for (int i = 0; i < NUM_LEDS; i++) {
-                    strip.setPixelColor(i, strip.Color(current_pulse_brightness, 0, 0)); // Pulsing Red
-                }
-            } else {
-                // --- Normal LED Update Logic (remains the same as before) ---
-                for (int i = 0; i < MAX_CLIENT_DEVICES; i++) {
-                    if (trackedClientDevices[i].isActive) {
-                        trackedClientDevices[i].activityScoreToAP *= ACTIVITY_DECAY_FACTOR;
-                        if (trackedClientDevices[i].activityScoreToAP < 0.5f) {
-                            trackedClientDevices[i].activityScoreToAP = 0;
-                        }
-                        trackedClientDevices[i].activityScoreFromAP *= ACTIVITY_DECAY_FACTOR;
-                        if (trackedClientDevices[i].activityScoreFromAP < 0.5f) {
-                            trackedClientDevices[i].activityScoreFromAP = 0;
-                        }
-
-                        if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS) {
-                            if (trackedClientDevices[i].activityScoreToAP == 0 && trackedClientDevices[i].activityScoreFromAP == 0) {
-                                 trackedClientDevices[i].isActive = false;
-                            } else if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS + 20000) { 
-                                trackedClientDevices[i].isActive = false;
-                            }
-                        }
-
-                        if (!trackedClientDevices[i].isActive) {
-                            trackedClientDevices[i].activityScoreToAP = 0;
-                            trackedClientDevices[i].activityScoreFromAP = 0;
-                        }
-
-                        uint32_t colorToAP = getActivityColor(trackedClientDevices[i].activityScoreToAP, MAX_ACTIVITY_SCORE);
-                        strip.setPixelColor(i, colorToAP);
-
-                        uint32_t colorFromAP = getActivityColor(trackedClientDevices[i].activityScoreFromAP, MAX_ACTIVITY_SCORE);
-                        strip.setPixelColor(i + MAX_CLIENT_DEVICES, colorFromAP);
-
-                    } else {
-                        if (ENABLE_IDLE_EFFECT) {
-                            float time_val_rad = (float)millis() / 1000.0f * IDLE_BREATH_SPEED; // millis() is okay here, it's for animation phase
-                            float breath_normalized_brightness = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET) + 1.0f) / 2.0f;
-                            uint8_t current_breath_brightness = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
-                            uint32_t idle_color_row1 = scaleColorBrightness(IDLE_R1, IDLE_G1, IDLE_B1, current_breath_brightness);
-                            strip.setPixelColor(i, idle_color_row1);
-
-                            float breath_normalized_brightness_r2 = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET + 0.3f) + 1.0f) / 2.0f;
-                            uint8_t current_breath_brightness_r2 = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness_r2 * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
-                            uint32_t idle_color_row2 = scaleColorBrightness(IDLE_R2, IDLE_G2, IDLE_B2, current_breath_brightness_r2);
-                            strip.setPixelColor(i + MAX_CLIENT_DEVICES, idle_color_row2);
-                        } else {
-                            strip.setPixelColor(i, strip.Color(0, 0, 0));
-                            strip.setPixelColor(i + MAX_CLIENT_DEVICES, strip.Color(0, 0, 0));
+                    if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS) {
+                        if (trackedClientDevices[i].activityScoreToAP == 0 && trackedClientDevices[i].activityScoreFromAP == 0) {
+                            trackedClientDevices[i].isActive = false;
+                        } else if (currentTime - trackedClientDevices[i].lastSeenTime > DEVICE_TIMEOUT_MS + 20000) {
+                            trackedClientDevices[i].isActive = false;
                         }
                     }
                 }
             }
+
+            // --- 3. DISPLAY LOGIC ---
+            // Render the LEDs based on the current state
+            switch (led_state) {
+                case STATE_INTRUDER_ALERT: {
+                    unsigned long time_since_alert_start = currentTime - g_intruder_alert_start_time_ms;
+                    float pulse_angular_frequency = 2.0f * PI * ALERT_PULSE_FREQUENCY_HZ;
+                    float normalized_brightness = (sinf((float)time_since_alert_start / 1000.0f * pulse_angular_frequency - (PI / 2.0f)) + 1.0f) / 2.0f;
+                    uint8_t current_pulse_brightness = ALERT_MIN_PULSE_BRIGHTNESS + (uint8_t)(normalized_brightness * (ALERT_MAX_PULSE_BRIGHTNESS - ALERT_MIN_PULSE_BRIGHTNESS));
+                    
+                    for (int i = 0; i < NUM_LEDS; i++) {
+                        strip.setPixelColor(i, strip.Color(current_pulse_brightness, 0, 0));
+                    }
+                    break;
+                }
+
+                case STATE_ALERT_FADEOUT: {
+                    float fade_progress = (float)(currentTime - fadeout_start_time_ms) / FADEOUT_DURATION_MS;
+                    fade_progress = fmin(1.0f, fade_progress); // Clamp progress to max 1.0
+
+                    uint32_t from_color = strip.Color(ALERT_MAX_PULSE_BRIGHTNESS, 0, 0); // Start the fade from bright red
+                    uint8_t from_r = (from_color >> 16) & 0xFF; // from_g and from_b are 0
+
+                    for (int i = 0; i < NUM_LEDS; i++) {
+                        // Calculate the color this LED should be in normal mode
+                        uint32_t to_color;
+                        int device_idx = i % MAX_CLIENT_DEVICES;
+                        bool is_first_row = i < MAX_CLIENT_DEVICES;
+
+                        if (trackedClientDevices[device_idx].isActive) {
+                             to_color = is_first_row ? 
+                                getActivityColor(trackedClientDevices[device_idx].activityScoreToAP, MAX_ACTIVITY_SCORE) :
+                                getActivityColor(trackedClientDevices[device_idx].activityScoreFromAP, MAX_ACTIVITY_SCORE);
+                        } else {
+                            if (ENABLE_IDLE_EFFECT) {
+                                float time_val_rad = (float)currentTime / 1000.0f * IDLE_BREATH_SPEED;
+                                float breath_norm_bright = (sinf(time_val_rad + (float)device_idx * IDLE_COLUMN_PHASE_OFFSET + (is_first_row ? 0.0f : 0.3f)) + 1.0f) / 2.0f;
+                                uint8_t idle_bright = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_norm_bright * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
+                                to_color = is_first_row ? 
+                                    scaleColorBrightness(IDLE_R1, IDLE_G1, IDLE_B1, idle_bright) :
+                                    scaleColorBrightness(IDLE_R2, IDLE_G2, IDLE_B2, idle_bright);
+                            } else {
+                                to_color = strip.Color(0,0,0);
+                            }
+                        }
+
+                        // Interpolate from RED to the target color
+                        uint8_t to_r = (to_color >> 16) & 0xFF;
+                        uint8_t to_g = (to_color >> 8) & 0xFF;
+                        uint8_t to_b = to_color & 0xFF;
+                        
+                        uint8_t final_r = (uint8_t)((float)from_r + (float)(to_r - from_r) * fade_progress);
+                        uint8_t final_g = (uint8_t)(0 + (float)(to_g - 0) * fade_progress);
+                        uint8_t final_b = (uint8_t)(0 + (float)(to_b - 0) * fade_progress);
+                        
+                        strip.setPixelColor(i, strip.Color(final_r, final_g, final_b));
+                    }
+                    break;
+                }
+
+                case STATE_NORMAL:
+                default: {
+                    for (int i = 0; i < MAX_CLIENT_DEVICES; i++) {
+                         if (!trackedClientDevices[i].isActive) { // Inactive slots get the idle effect
+                            if (ENABLE_IDLE_EFFECT) {
+                                float time_val_rad = (float)currentTime / 1000.0f * IDLE_BREATH_SPEED;
+                                float breath_normalized_brightness = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET) + 1.0f) / 2.0f;
+                                uint8_t current_breath_brightness = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
+                                uint32_t idle_color_row1 = scaleColorBrightness(IDLE_R1, IDLE_G1, IDLE_B1, current_breath_brightness);
+                                strip.setPixelColor(i, idle_color_row1);
+
+                                float breath_normalized_brightness_r2 = (sinf(time_val_rad + (float)i * IDLE_COLUMN_PHASE_OFFSET + 0.3f) + 1.0f) / 2.0f;
+                                uint8_t current_breath_brightness_r2 = IDLE_MIN_BRIGHTNESS + (uint8_t)(breath_normalized_brightness_r2 * (IDLE_MAX_BRIGHTNESS - IDLE_MIN_BRIGHTNESS));
+                                uint32_t idle_color_row2 = scaleColorBrightness(IDLE_R2, IDLE_G2, IDLE_B2, current_breath_brightness_r2);
+                                strip.setPixelColor(i + MAX_CLIENT_DEVICES, idle_color_row2);
+                            } else {
+                                strip.setPixelColor(i, strip.Color(0,0,0));
+                                strip.setPixelColor(i + MAX_CLIENT_DEVICES, strip.Color(0,0,0));
+                            }
+                         } else { // Active slots get the activity color
+                            uint32_t colorToAP = getActivityColor(trackedClientDevices[i].activityScoreToAP, MAX_ACTIVITY_SCORE);
+                            strip.setPixelColor(i, colorToAP);
+                            uint32_t colorFromAP = getActivityColor(trackedClientDevices[i].activityScoreFromAP, MAX_ACTIVITY_SCORE);
+                            strip.setPixelColor(i + MAX_CLIENT_DEVICES, colorFromAP);
+                         }
+                    }
+                    break;
+                }
+            } // end switch
             xSemaphoreGive(deviceDataMutex);
         }
         strip.show();
