@@ -13,8 +13,6 @@ So I DIYed a Wi-Fi sniffer and used code and algorithms to visualize the capture
 🧵 [Threads](https://www.threads.net/@coreoobb "@coreoobb") @coreoobb  
 ▶️ This Project’s Video: [YouTube](https://youtu.be/fgVX8Ttq5zc "Youtube") | [Bilibili](https://www.bilibili.com/video/BV1DB8xz7E7a "Bilibili")
 
-# Do not repost on Gitee
-
 Designed By Corebb With Love From bbRealm!
 
 # Project Structure:
