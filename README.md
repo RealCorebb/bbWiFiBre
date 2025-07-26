@@ -9,7 +9,7 @@
 😄[爱发电](https://afdian.com/a/kuruibb "爱发电")   
 🐧QQ 群（仅供交流）：647186542  
 🧵[Threads](https://www.threads.net/@coreoobb "@coreoobb") @coreoobb  
-▶️ 本期视频(Video): [Youtube](https://youtu.be/Or8UPq3nDdc "Youtube") | [ Bilibili](https://www.bilibili.com/video/BV1r6PceuEDK " Bilibili")
+▶️ 本期视频(Video): [Youtube](https://youtu.be/fgVX8Ttq5zc "Youtube") | [ Bilibili](https://www.bilibili.com/video/BV1DB8xz7E7a " Bilibili")
 
 # 禁止搬运到 Gitee
 
