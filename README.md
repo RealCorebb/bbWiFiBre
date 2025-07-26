@@ -18,9 +18,9 @@ Designed By Corebb With Love From bbRealm!
 # 目录结构：
 
 **Arduino** Arduino 主程序，烧录到 ESP32 中  
-**PCB** PCB 原理图、Gerber 制板文件、BOM
-**CAD** 3D模型、DXF切割图纸
-**test** Arduino 测试程序，作为嗅探器输出调试信息
+**PCB** PCB 原理图、Gerber 制板文件、BOM  
+**CAD** 3D模型、DXF切割图纸  
+**test** Arduino 测试程序，作为嗅探器输出调试信息  
 
 # 参考资料：
 
