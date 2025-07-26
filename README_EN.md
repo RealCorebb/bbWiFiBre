@@ -2,7 +2,7 @@
 
 ![image](https://github.com/RealCorebb/bbWiFiBre/blob/main/IMG/bbWiFibre.jpg?raw=true)
 
-## An Ambient Light That *Sees* Wi-Fi Signals
+## A Mood Light That *Sees* Wi-Fi Signals
 
 We’re all familiar with the blinking LEDs on computers and router Ethernet ports — seemingly random, and no one really pays attention. But what about wireless Wi-Fi signals? Could we create a similar kind of "signal light" for them?
 
