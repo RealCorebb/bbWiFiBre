@@ -354,7 +354,7 @@ void bleConnectionTask(void* parameter) {
 
 void setup() {
     Serial.begin(115200);
-    while (!Serial) { delay(10); }
+    //while (!Serial) { delay(10); }
 
     Serial.println("bbWiFiBre - Multi-mode WiFi Monitor with BLE");
     Serial.println("Commands:");
