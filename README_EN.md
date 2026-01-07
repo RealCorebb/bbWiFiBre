@@ -10,7 +10,9 @@ So I DIYed a Wi-Fi sniffer and used code and algorithms to visualize the capture
 
 😄[Afdian (Support Me)](https://afdian.com/a/kuruibb "Afdian")  
 🐧 QQ Group (for discussion only): 647186542  
+😈 Discord Channel：[Join](https://discord.gg/gvbcCtdQrk "Join")  
 🧵 [Threads](https://www.threads.net/@coreoobb "@coreoobb") @coreoobb  
+   
 ▶️ This Project’s Video: [YouTube](https://youtu.be/fgVX8Ttq5zc "Youtube") | [Bilibili](https://www.bilibili.com/video/BV1DB8xz7E7a "Bilibili")
 
 Designed By Corebb With Love From bbRealm!
