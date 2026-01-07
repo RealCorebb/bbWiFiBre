@@ -7,8 +7,9 @@
 电脑、路由器网口上闪烁的小灯大家都不陌生，看上去像是在乱闪，没人太在意。那无线的 Wi-Fi 网络，能不能也做一个这种“信号灯”呢？于是我 DIY 了一个 Wi-Fi 嗅探器，并将捕捉到的数据通过代码和算法进行可视化，变成了一个可以实时探测 Wi-Fi 信号的氛围灯。
 
 😄[爱发电](https://afdian.com/a/kuruibb "爱发电") (已更新此图文教程）  
-🐧QQ 群（仅供交流）：647186542  
 🧵[Threads](https://www.threads.net/@coreoobb "@coreoobb") @coreoobb  
+🐧QQ 群（仅供交流，人满请加Discord）：647186542  
+😈Discord 频道：[加入](https://discord.gg/gvbcCtdQrk "加入")   
 ▶️ 本期视频(Video): [Youtube](https://youtu.be/fgVX8Ttq5zc "Youtube") | [ Bilibili](https://www.bilibili.com/video/BV1DB8xz7E7a " Bilibili")
 
 # 禁止搬运到 Gitee
